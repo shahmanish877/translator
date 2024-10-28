@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Translate JSON to Hebrew</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+<div class="flex flex-col">
+    <div class="bg-white p-8 rounded shadow-md w-full mb-4">
+        <h1 class="text-2xl font-bold mb-4">Translate JSON to Hebrew</h1>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="mb-4">
+                <label for="file" class="block text-gray-700 text-sm font-bold mb-2">Choose JSON file:</label>
+                <input type="file" id="file" name="file" required accept=".json" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+            </div>
+            <div class="mb-4">
+                <label for="prompt" class="block text-gray-700 text-sm font-bold mb-2">Gemini Prompt:</label>
+                <textarea id="prompt" name="prompt" rows="8" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">You will be provided with a sentence in English, and your task is to translate it into Hebrew. Please ensure that the translation is complete, contextually appropriate, and does not include any English content or requests for additional context or clarification. Do not use Hebrew accent marks, and always use the Hebrew plural form wherever possible. Remember not to use  accent marks in any condition</textarea>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Choose API:</label>
+                <div class="flex items-center">
+                    <input type="radio" id="gemini" name="api" value="gemini" class="mr-2">
+                    <label for="gemini" class="mr-4">Gemini</label>
+                    <input type="radio" id="openai" name="api" value="openai" checked class="mr-2">
+                    <label for="openai">OpenAI</label>
+                </div>
+            </div>
+            <div class="flex justify-between">
+                <button type="submit" id="translateBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">Translate</button>
+                <button type="button" id="cancelBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2">Cancel</button>
+            </div>
+        </form>
+        <div id="loading" class="hidden mt-4 text-gray-600 flex items-center justify-center">
+            <svg class="animate-spin h-5 w-5 mr-3 text-indigo-500" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Processing...
+        </div>
+        <div id="message" class="hidden mt-4"></div>
+        <a id="download" href="#" class="hidden mt-4 block text-center w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Download Translated JSON</a>
+    </div>
+    <div class="bg-white p-8 rounded shadow-md w-full">
+        <h2 class="text-xl font-bold mb-4">Log</h2>
+        <div id="log" class="text-sm text-gray-700 overflow-auto h-96 border border-gray-300 p-2"></div>
+    </div>
+</div>
+
+<script>
+    const uploadForm = document.getElementById('uploadForm');
+    const translateBtn = document.getElementById('translateBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const loading = document.getElementById('loading');
+    const message = document.getElementById('message');
+    const downloadLink = document.getElementById('download');
+    const logContainer = document.getElementById('log');
+    const fileInput = document.getElementById('file');
+    const prompt = document.getElementById('prompt');
+    let logInterval;
+
+    function disableForm(disable) {
+        fileInput.disabled = disable;
+        // promptTextarea.disabled = disable;
+        prompt.disabled = disable;
+        translateBtn.disabled = disable;
+        document.querySelectorAll('input[name="api"]').forEach(radio => radio.disabled = disable);
+        if (disable) {
+            translateBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+            translateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    }
+
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(uploadForm);
+        formData.append('useGemini', document.getElementById('gemini').checked);
+
+        loading.classList.remove('hidden');
+        message.classList.add('hidden');
+        downloadLink.classList.add('hidden');
+        logContainer.innerHTML = '';
+        disableForm(true);
+
+        try {
+            const response = await fetch('/translate', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                message.textContent = 'Translation completed successfully!';
+                message.classList.remove('hidden');
+                message.classList.add('text-green-500');
+                message.classList.remove('text-red-500');
+                downloadLink.href = result.file;
+                downloadLink.classList.remove('hidden');
+                clearInterval(logInterval);
+            } else {
+                throw new Error(result.message || 'Translation failed');
+            }
+        } catch (error) {
+            message.textContent = `Error: ${error.message}`;
+            message.classList.remove('hidden');
+            message.classList.add('text-red-500');
+            message.classList.remove('text-green-500');
+            clearInterval(logInterval);
+        } finally {
+            loading.classList.add('hidden');
+            disableForm(false);
+            await updateLog();  // Final log update
+        }
+    });
+
+    cancelBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/cancel', { method: 'POST' });
+            const result = await response.json();
+            if (result.status === 'canceled') {
+                message.textContent = 'Translation cancelled.';
+                message.classList.remove('hidden');
+                message.classList.remove('text-green-500');
+                message.classList.add('text-red-500');
+                clearInterval(logInterval);
+                updateLog();  // Final log update
+                disableForm(false);
+            }
+        } catch (error) {
+            console.error('Error cancelling translation:', error);
+        }
+    });
+
+    async function updateLog() {
+        try {
+            const response = await fetch('/log');
+            const log = await response.text();
+            logContainer.innerHTML = log.replace(/\n/g, '<br>');
+        } catch (error) {
+            console.error('Error updating log:', error);
+        }
+    }
+
+    uploadForm.addEventListener('submit', () => {
+        logInterval = setInterval(updateLog, 2000);
+    });
+</script>
+</body>
+</html>
